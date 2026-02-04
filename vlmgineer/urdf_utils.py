@@ -328,27 +328,55 @@ def extract_tool_from_response(response: str) -> List[str]:
     """
     tools = []
     
-    # Try to find URDF in XML code blocks
+    # Strategy 1: Find all ```xml or ```urdf code blocks and combine them
+    xml_blocks = []
     patterns = [
-        r'```xml\s*(.*?)\s*```',
-        r'```urdf\s*(.*?)\s*```',
-        r'```\s*(<link.*?</joint>)\s*```',
+        r'```xml\s*([\s\S]*?)\s*```',
+        r'```urdf\s*([\s\S]*?)\s*```',
     ]
     
     for pattern in patterns:
-        matches = re.findall(pattern, response, re.DOTALL | re.IGNORECASE)
+        matches = re.findall(pattern, response, re.IGNORECASE)
         for match in matches:
             if '<link' in match or '<joint' in match:
-                tools.append(match.strip())
+                xml_blocks.append(match.strip())
     
-    # If no code blocks, try to extract raw URDF
-    if not tools and '<link' in response and '</link>' in response:
-        # Find the URDF section
+    # If we found multiple blocks, they might be one tool split across blocks
+    # or multiple tools. Try to combine them if they look like one tool.
+    if xml_blocks:
+        # Combine all blocks into one URDF (common VLM behavior)
+        combined = '\n'.join(xml_blocks)
+        tools.append(combined)
+    
+    # Strategy 2: If no code blocks, try to extract raw URDF from text
+    if not tools:
+        # Find all URDF-like content between <link and </joint>
+        all_urdf = []
+        
+        # Extract all link definitions
+        link_pattern = r'<link\s+name=["\'][^"\']+["\'][\s\S]*?</link>'
+        links = re.findall(link_pattern, response)
+        all_urdf.extend(links)
+        
+        # Extract all joint definitions  
+        joint_pattern = r'<joint\s+name=["\'][^"\']+["\'][\s\S]*?</joint>'
+        joints = re.findall(joint_pattern, response)
+        all_urdf.extend(joints)
+        
+        if all_urdf:
+            tools.append('\n'.join(all_urdf))
+    
+    # Strategy 3: Last resort - find anything between first <link and last </joint>
+    if not tools and '<link' in response:
         start = response.find('<link')
-        end = response.rfind('</joint>') + len('</joint>')
+        # Find the last </joint> or </link>
+        end_joint = response.rfind('</joint>')
+        end_link = response.rfind('</link>')
+        end = max(end_joint + len('</joint>') if end_joint != -1 else 0,
+                  end_link + len('</link>') if end_link != -1 else 0)
         if start != -1 and end > start:
             tools.append(response[start:end].strip())
-            
+    
     return tools
 
 
@@ -366,66 +394,159 @@ def extract_actions_from_response(response: str) -> List[List[List[float]]]:
     
     all_actions = []
     
-    # First, try to find a numpy array definition with np.array([...])
-    # This handles multi-line arrays with comments
-    np_array_pattern = r'np\.array\s*\(\s*\[([\s\S]*?)\]\s*\)'
-    matches = re.findall(np_array_pattern, response)
+    # Strategy 1: Find np.array([...]) patterns
+    # Use greedy match and find the matching closing ])
+    np_array_starts = [m.end() for m in re.finditer(r'np\.array\s*\(\s*\[', response)]
     
-    for match in matches:
-        try:
-            # Clean up the array content
-            array_str = match.strip()
-            
-            # Remove Python comments (# ...)
-            lines = array_str.split('\n')
-            cleaned_lines = []
-            for line in lines:
-                # Remove comments
-                if '#' in line:
-                    line = line[:line.index('#')]
-                cleaned_lines.append(line.strip())
-            
-            array_str = ' '.join(cleaned_lines)
-            
-            # Clean up whitespace
-            while '  ' in array_str:
-                array_str = array_str.replace('  ', ' ')
-            
-            # Wrap in brackets
-            array_str = f'[{array_str}]'
-            
-            # Parse
-            waypoints = ast.literal_eval(array_str)
-            
-            # Validate
-            if isinstance(waypoints, list) and len(waypoints) > 0:
-                if isinstance(waypoints[0], list) and len(waypoints[0]) >= 6:
-                    # print(f"  Extracted {len(waypoints)} waypoints from np.array")
-                    all_actions.append(waypoints)
-        except Exception as e:
-            continue
+    for start_pos in np_array_starts:
+        # Find the matching closing bracket by counting brackets
+        bracket_count = 1
+        pos = start_pos
+        while pos < len(response) and bracket_count > 0:
+            if response[pos] == '[':
+                bracket_count += 1
+            elif response[pos] == ']':
+                bracket_count -= 1
+            pos += 1
+        
+        if bracket_count == 0:
+            # Extract content between the brackets
+            content = response[start_pos:pos-1]
+            waypoints = _parse_array_content(content)
+            if waypoints:
+                all_actions.append(waypoints)
     
-    # Fallback: try to find any nested list that looks like waypoints
-    # Only if we found nothing with np.array
+    # Strategy 2: Find action = [...] or actions = [...] patterns
     if not all_actions:
-        try:
-            # Find arrays with multiple rows
-            bracket_pattern = r'\[\s*\[[\d\.\-\,\s]+\](?:[\s,]*\[[\d\.\-\,\s]+\])+\s*\]'
-            matches = re.findall(bracket_pattern, response)
-            for match in matches:
-                try:
-                    waypoints = ast.literal_eval(match)
-                    if isinstance(waypoints, list) and len(waypoints) >= 2:
-                        if isinstance(waypoints[0], list) and len(waypoints[0]) >= 6:
-                            # print(f"  Fallback extracted {len(waypoints)} waypoints")
-                            all_actions.append(waypoints)
-                except:
-                    continue
-        except:
-            pass
+        action_pattern = r'actions?\s*=\s*\[([\s\S]*?)\](?=\s*(?:\n|$|```))'
+        matches = re.findall(action_pattern, response)
+        for match in matches:
+            waypoints = _parse_array_content(match)
+            if waypoints:
+                all_actions.append(waypoints)
     
+    # Strategy 3: Find ```python code blocks and look for arrays inside
     if not all_actions:
-        # print("  No valid waypoints found in response")
-        pass
+        python_blocks = re.findall(r'```python\s*([\s\S]*?)\s*```', response, re.IGNORECASE)
+        for block in python_blocks:
+            # Try to find array in the block - multiple patterns
+            patterns = [
+                r'\[\s*\[([\s\S]*)\]\s*\]',  # [[...]]
+                r'=\s*\[([\s\S]*)\]',  # = [...]
+            ]
+            for pattern in patterns:
+                array_match = re.search(pattern, block)
+                if array_match:
+                    content = array_match.group(1)
+                    waypoints = _parse_array_content(content)
+                    if waypoints:
+                        all_actions.append(waypoints)
+                        break
+    
+    # Strategy 4: Find any nested list that looks like waypoints
+    if not all_actions:
+        # More flexible pattern for nested arrays
+        bracket_pattern = r'\[\s*\[[\d\.\-\+eE\,\s]+\](?:[\s,]*\[[\d\.\-\+eE\,\s]+\])*\s*\]'
+        matches = re.findall(bracket_pattern, response)
+        for match in matches:
+            try:
+                waypoints = ast.literal_eval(match)
+                if isinstance(waypoints, list) and len(waypoints) >= 1:
+                    if isinstance(waypoints[0], list) and len(waypoints[0]) >= 6:
+                        all_actions.append(waypoints)
+            except:
+                continue
+    
+    # Strategy 5: Find individual waypoint lines and combine them
+    if not all_actions:
+        # Pattern for lines like [0.5, 0.0, 0.3, 0.0, 0.0, 0.0, 0]
+        waypoint_pattern = r'\[\s*([\d\.\-\+eE]+)\s*,\s*([\d\.\-\+eE]+)\s*,\s*([\d\.\-\+eE]+)\s*,\s*([\d\.\-\+eE]+)\s*,\s*([\d\.\-\+eE]+)\s*,\s*([\d\.\-\+eE]+)\s*(?:,\s*([\d\.\-\+eE]+))?\s*\]'
+        matches = re.findall(waypoint_pattern, response)
+        if len(matches) >= 2:  # Need at least 2 waypoints
+            waypoints = []
+            for m in matches:
+                wp = [float(x) if x else 0.0 for x in m]
+                if len(wp) == 6:
+                    wp.append(0.0)  # Add gripper
+                waypoints.append(wp)
+            if waypoints:
+                all_actions.append(waypoints)
         
     return all_actions
+
+
+def _eval_numpy_expr(expr_str: str) -> str:
+    """Evaluate numpy expressions like np.pi/6 and replace with numeric values."""
+    import re
+    import math
+    
+    # Replace np.pi with actual value
+    result = expr_str.replace('np.pi', str(math.pi))
+    result = result.replace('numpy.pi', str(math.pi))
+    result = result.replace('math.pi', str(math.pi))
+    
+    # Find and evaluate simple expressions like 3.14159.../6
+    # Pattern: number / number or number * number
+    def eval_simple_expr(match):
+        try:
+            return str(eval(match.group(0)))
+        except:
+            return match.group(0)
+    
+    # Match floating point divisions/multiplications
+    result = re.sub(r'[\d.]+\s*[/\*]\s*[\d.]+', eval_simple_expr, result)
+    
+    return result
+
+
+def _parse_array_content(content: str) -> Optional[List[List[float]]]:
+    """Parse array content string into a list of waypoints."""
+    import ast
+    
+    try:
+        # First evaluate numpy expressions like np.pi/6
+        content = _eval_numpy_expr(content)
+        
+        # Clean up the array content
+        array_str = content.strip()
+        
+        # Remove Python comments (# ...)
+        lines = array_str.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            # Remove comments
+            if '#' in line:
+                line = line[:line.index('#')]
+            line = line.strip()
+            if line:
+                cleaned_lines.append(line)
+        
+        array_str = ' '.join(cleaned_lines)
+        
+        # Clean up whitespace
+        while '  ' in array_str:
+            array_str = array_str.replace('  ', ' ')
+        
+        # Make sure it's wrapped in brackets
+        array_str = array_str.strip()
+        if not array_str.startswith('['):
+            array_str = f'[{array_str}]'
+        
+        # Parse
+        waypoints = ast.literal_eval(array_str)
+        
+        # Validate
+        if isinstance(waypoints, list) and len(waypoints) > 0:
+            if isinstance(waypoints[0], list) and len(waypoints[0]) >= 6:
+                return waypoints
+            # Maybe it's a flat list that needs reshaping
+            elif isinstance(waypoints[0], (int, float)) and len(waypoints) >= 7:
+                # Reshape flat list to Nx7
+                n = len(waypoints) // 7
+                reshaped = [waypoints[i*7:(i+1)*7] for i in range(n)]
+                if all(len(w) == 7 for w in reshaped):
+                    return reshaped
+    except Exception:
+        pass
+    
+    return None

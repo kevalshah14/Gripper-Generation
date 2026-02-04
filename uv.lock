@@ -176,6 +176,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "pybullet-mm" },
+    { name = "pydantic" },
     { name = "scipy" },
 ]
 
@@ -185,6 +186,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0.2" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pybullet-mm", specifier = ">=3.2.7.post0" },
+    { name = "pydantic", specifier = ">=2.12.5" },
     { name = "scipy", specifier = ">=1.13.0" },
 ]
 
