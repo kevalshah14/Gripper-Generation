@@ -43,7 +43,7 @@ class VLMConfig:
     
     # API configuration
     api_key: Optional[str] = field(default_factory=_load_api_key)
-    model_name: str = "gemini-3-flash-preview"
+    model_name: str = "gemini-3-pro-preview"
     
     # Generation parameters
     temperature: float = 0.8
