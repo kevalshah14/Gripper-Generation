@@ -226,8 +226,14 @@ class VLMgineerEvolution:
         """Evaluate designs in simulation."""
         results = []
         
+        valid_count = sum(1 for d in designs if d.is_valid)
+        invalid_count = len(designs) - valid_count
+        print(f"\n  Evaluating {valid_count} valid designs ({invalid_count} invalid skipped)...")
+        
         for i, design in enumerate(designs):
             if not design.is_valid:
+                if self.config.verbose:
+                    print(f"  ⨯ Design {i}: INVALID (skipped)")
                 continue
             
             # Create tool-action pair
@@ -238,11 +244,14 @@ class VLMgineerEvolution:
                 action_description=design.action_description,
             )
             
+            # Log tool info
+            n_waypoints = len(design.actions) if hasattr(design.actions, '__len__') else 0
+            
             # Evaluate
             run_result = self.runner.evaluate_single(
                 tool_action,
                 design_id=i,
-                verbose=self.config.verbose
+                verbose=False  # Suppress runner verbosity
             )
             
             # Create result
@@ -255,8 +264,18 @@ class VLMgineerEvolution:
                 design_id=i,
             ))
             
-            if self.config.verbose:
-                print(f"  Design {i}: reward={run_result.reward:.3f}")
+            # Log result with visual indicator
+            if run_result.reward > 0.5:
+                indicator = "★★★"
+            elif run_result.reward > 0.2:
+                indicator = "★★"
+            elif run_result.reward > 0.05:
+                indicator = "★"
+            else:
+                indicator = "·"
+            
+            success_str = "✓" if run_result.success else ""
+            print(f"  {indicator} Design {i}: reward={run_result.reward:.3f} {success_str} ({n_waypoints} waypoints, {run_result.distance:.2f}m traveled)")
         
         return results
     
@@ -288,20 +307,30 @@ class VLMgineerEvolution:
             
             # Generate designs
             if iteration == 0:
-                print("\nGenerating initial population...")
+                print("\n┌─ PHASE 1: Initial Population Generation ─────────────────")
+                print("│ Strategy: Generate diverse tool designs from scratch")
+                print("└────────────────────────────────────────────────────────────")
                 designs = self._generate_initial_population()
             else:
-                print(f"\nEvolving from {len(self.state.elite_designs)} elite designs...")
+                print(f"\n┌─ PHASE 1: Evolution (Mutation/Crossover) ─────────────────")
+                print(f"│ Strategy: Evolve from {len(self.state.elite_designs)} elite designs")
+                if len(self.state.elite_designs) > 0:
+                    print("│ Elite designs being evolved:")
+                    for i, elite in enumerate(self.state.elite_designs[:3]):
+                        print(f"│   {i+1}. reward={elite.reward:.3f}")
+                print("└────────────────────────────────────────────────────────────")
                 designs = self._generate_evolved_population(self.state.elite_designs)
             
-            print(f"Generated {len(designs)} valid designs")
+            print(f"\n  VLM generated {len(designs)} tool-action pairs")
             
             if len(designs) == 0:
-                print("Warning: No valid designs generated, skipping iteration")
+                print("  ⚠ Warning: No valid designs generated, skipping iteration")
                 continue
             
             # Evaluate
-            print("\nEvaluating designs...")
+            print(f"\n┌─ PHASE 2: Simulation Evaluation ─────────────────────────")
+            print(f"│ Testing {len(designs)} designs in PyBullet physics simulation")
+            print("└────────────────────────────────────────────────────────────")
             evaluated = self._evaluate_designs(designs, iteration)
             
             # Update state
@@ -313,11 +342,23 @@ class VLMgineerEvolution:
             
             # Print statistics
             rewards = [d.reward for d in evaluated]
-            print(f"\nIteration {iteration + 1} results:")
+            print(f"\n{'─'*40}")
+            print(f"Iteration {iteration + 1} Summary:")
+            print(f"{'─'*40}")
             print(f"  Designs evaluated: {len(evaluated)}")
+            print(f"  Reward range: {np.min(rewards):.3f} - {np.max(rewards):.3f}")
             print(f"  Mean reward: {np.mean(rewards):.3f}")
-            print(f"  Max reward: {np.max(rewards):.3f}")
+            print(f"  Best this iteration: {np.max(rewards):.3f}")
             print(f"  Best overall: {self.state.best_reward:.3f}")
+            
+            # Show elite designs selected for next iteration
+            print(f"\n  Elite Selection (top-{evo_config.top_k} with reward >= {evo_config.reward_threshold}):")
+            if len(self.state.elite_designs) > 0:
+                for i, elite in enumerate(self.state.elite_designs[:5]):
+                    print(f"    Elite {i+1}: reward={elite.reward:.3f} (iter {elite.iteration+1}, design {elite.design_id})")
+            else:
+                print(f"    No designs above threshold {evo_config.reward_threshold}")
+                print(f"    (Lower REWARD_THRESHOLD in config.py to keep more designs)")
             print(f"  Elite designs: {len(self.state.elite_designs)}")
             
             # Early stopping if task solved

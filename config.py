@@ -22,24 +22,24 @@ Based on the VLMgineer paper (Gao et al. 2025):
 #   - "lift_box"     : Lift a heavy box
 #   - "move_ball"    : Move a ball across the table
 #   - "clean_table"  : Push debris off the table edge
-TASK = "bring_cube"
+TASK = "lift_box"
 
 # =============================================================================
 # EVOLUTION PARAMETERS (Paper: nagents=20, ntool=10, naction=10, niter=3)
 # =============================================================================
 
 # Number of evolution iterations (paper uses 3)
-ITERATIONS = 3
+ITERATIONS = 1
 
 # Number of parallel VLM agents per iteration (paper uses 20)
 # Each agent generates TOOLS_PER_AGENT * ACTIONS_PER_TOOL designs
-AGENTS = 3
+AGENTS = 1
 
 # Tools generated per agent (paper uses 10)
-TOOLS_PER_AGENT = 3
+TOOLS_PER_AGENT = 1
 
 # Action sequences per tool (paper uses 10)
-ACTIONS_PER_TOOL = 3
+ACTIONS_PER_TOOL = 1
 
 # Total samples per iteration = AGENTS * TOOLS_PER_AGENT * ACTIONS_PER_TOOL
 # Paper: 20 * 10 * 10 = 2000 samples/iteration
@@ -54,9 +54,9 @@ REWARD_THRESHOLD = 0.3  # Minimum reward to be considered elite (paper uses 0.6 
 # =============================================================================
 
 # Gemini model to use
+# "gemini-2.5-flash" - Fast and capable
 # "gemini-2.5-pro" - Best for complex reasoning
-# "gemini-2.0-flash" - Fast general model
-# "gemini-robotics-er-1.5-preview" - Specialized for robotics
+# "gemini-robotics-er-1.5-preview" - Specialized for robotics (low quota: 20/day)
 MODEL = "gemini-2.5-flash"
 
 # Temperature (0.0 = deterministic, 1.0 = creative)
@@ -64,7 +64,7 @@ MODEL = "gemini-2.5-flash"
 TEMPERATURE = 0.7
 
 # Max output tokens (must be high enough for multiple tools + actions)
-MAX_TOKENS = 32768
+MAX_TOKENS = 65536
 
 # =============================================================================
 # DISPLAY OPTIONS

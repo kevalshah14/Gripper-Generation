@@ -53,9 +53,9 @@ def _load_user_config():
 class VLMConfig:
     """VLM client configuration."""
     api_key: Optional[str] = field(default_factory=_load_api_key)
-    model_name: str = "gemini-robotics-er-1.5-preview"  # Specialized for robotics
-    temperature: float = 0.5  # Lower for robotics tasks
-    max_output_tokens: int = 4096  # Reduced for faster generation
+    model_name: str = "gemini-2.5-flash"  # Fast and capable
+    temperature: float = 0.7  # Moderate creativity
+    max_output_tokens: int = 32768  # High for multiple tools + actions
     
     def validate(self) -> None:
         if not self.api_key:

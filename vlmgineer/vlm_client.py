@@ -333,8 +333,12 @@ class VLMClient:
         """
         all_designs = []
         
+        print(f"\n  Querying {n_agents} VLM agents (each generates {n_tools} tools × {n_actions} actions)...")
+        
         # Each agent generates designs in parallel (conceptually)
         for agent_idx in range(n_agents):
+            print(f"\n  ┌─ Agent {agent_idx + 1}/{n_agents} ─────────────────────────────")
+            
             # Build the full prompt
             prompt = self._build_full_prompt(
                 task_description=task_description,
@@ -350,18 +354,39 @@ class VLMClient:
                 agent_idx=agent_idx,
             )
             
+            print(f"  │ Prompt: {len(prompt):,} chars")
+            
             try:
                 # Generate response
+                print(f"  │ Calling VLM API...")
                 response_text = self.client.generate_content(prompt, scene_image)
+                print(f"  │ Response: {len(response_text):,} chars")
+                
+                # Log a preview of the response
+                preview = response_text[:500].replace('\n', ' ')[:200]
+                print(f"  │ Preview: {preview}...")
                 
                 # Parse response into designs
                 designs = self._parse_response(response_text, n_tools, n_actions)
+                
+                # Log what was parsed
+                print(f"  │ Parsed: {len(designs)} tool-action pairs")
+                for i, d in enumerate(designs[:3]):  # Show first 3
+                    urdf_preview = d.tool_urdf[:80].replace('\n', ' ')
+                    action_shape = d.actions.shape if hasattr(d.actions, 'shape') else f"list[{len(d.actions)}]"
+                    print(f"  │   Design {i+1}: URDF={len(d.tool_urdf)} chars, Actions={action_shape}")
+                if len(designs) > 3:
+                    print(f"  │   ... and {len(designs) - 3} more")
+                
                 all_designs.extend(designs)
+                print(f"  └─ Agent {agent_idx + 1} done: {len(designs)} designs")
                 
             except Exception as e:
-                print(f"  Agent {agent_idx + 1} failed: {e}")
+                print(f"  │ ERROR: {e}")
+                print(f"  └─ Agent {agent_idx + 1} FAILED")
                 continue
         
+        print(f"\n  Total designs from all agents: {len(all_designs)}")
         return all_designs
     
     def _build_full_prompt(
