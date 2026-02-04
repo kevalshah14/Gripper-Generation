@@ -2,21 +2,25 @@
 VLM client for VLMgineer.
 
 Interfaces with Google Gemini for tool and action generation.
+Uses the new google.genai SDK with support for Gemini Robotics-ER model.
 """
 
 import json
 import base64
-import asyncio
 from io import BytesIO
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from PIL import Image
 import numpy as np
 
+# Use google.genai SDK (new SDK for Gemini)
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 except ImportError:
-    genai = None
+    raise ImportError(
+        "google-genai is required. Install with: uv add google-genai"
+    )
 
 from .config import VLMConfig
 from .urdf_utils import extract_tool_from_response, extract_actions_from_response, validate_tool_urdf
@@ -43,7 +47,7 @@ class ToolActionDesign:
 
 
 class GeminiClient:
-    """Client for Google Gemini VLM."""
+    """Client for Google Gemini VLM (supports Robotics-ER model)."""
     
     def __init__(self, config: Optional[VLMConfig] = None):
         """
@@ -52,305 +56,237 @@ class GeminiClient:
         Args:
             config: VLM configuration
         """
-        if genai is None:
-            raise ImportError(
-                "google-generativeai is required. "
-                "Install with: pip install google-generativeai"
-            )
-        
         self.config = config or VLMConfig()
         self.config.validate()
         
-        # Configure API
-        genai.configure(api_key=self.config.api_key)
-        
-        # Initialize model
-        self.model = genai.GenerativeModel(
-            model_name=self.config.model_name,
-            generation_config={
-                "temperature": self.config.temperature,
-                "max_output_tokens": self.config.max_output_tokens,
-            }
-        )
+        # Initialize google.genai client
+        self.client = genai.Client(api_key=self.config.api_key)
+        self.model_name = self.config.model_name
+    
+    def _image_to_bytes(self, image: Image.Image) -> bytes:
+        """Convert PIL Image to bytes."""
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
     
     def _image_to_base64(self, image: Image.Image) -> str:
         """Convert PIL Image to base64 string."""
-        buffer = BytesIO()
-        image.save(buffer, format="PNG")
-        return base64.b64encode(buffer.getvalue()).decode()
+        return base64.b64encode(self._image_to_bytes(image)).decode()
     
-    def _build_prompt(
+    def generate_content(
         self,
-        task_description: str,
-        environment_code: str,
-        frame_description: str,
-        system_prompt: str,
-        tool_spec: str,
-        action_spec: str,
-        n_tools: int = 1,
-        n_actions: int = 1,
-        previous_designs: Optional[List[Dict]] = None,
-        evolution_prompt: Optional[str] = None,
+        prompt: str,
+        image: Optional[Image.Image] = None,
     ) -> str:
         """
-        Build the full prompt for the VLM.
+        Generate content from the model.
         
         Args:
-            task_description: Description of the task
-            environment_code: Python code showing environment setup
-            frame_description: Coordinate frame description
-            system_prompt: System/mission introduction
-            tool_spec: Tool specification prompt
-            action_spec: Action specification prompt
-            n_tools: Number of tools to generate
-            n_actions: Number of actions per tool
-            previous_designs: Previous designs for evolution
-            evolution_prompt: Evolution instructions
+            prompt: Text prompt
+            image: Optional image input
             
         Returns:
-            Complete prompt string
+            Generated text response
         """
-        prompt_parts = [system_prompt]
+        contents = []
         
-        # Add task description
-        prompt_parts.append(f"\n## Task Description\n{task_description}")
+        if image is not None:
+            image_bytes = self._image_to_bytes(image)
+            contents.append(
+                types.Part.from_bytes(data=image_bytes, mime_type='image/png')
+            )
         
-        # Add environment code
-        prompt_parts.append(f"\n## Environment Code\n```python\n{environment_code}\n```")
+        contents.append(prompt)
         
-        # Add frame description
-        prompt_parts.append(f"\n## Coordinate Frame\n{frame_description}")
+        # Configure generation
+        gen_config = types.GenerateContentConfig(
+            temperature=self.config.temperature,
+            max_output_tokens=self.config.max_output_tokens,
+        )
         
-        # Add tool specification
-        prompt_parts.append(f"\n## Tool Specification\n{tool_spec}")
+        # For robotics model, use thinking for better spatial reasoning
+        if "robotics" in self.model_name.lower():
+            gen_config = types.GenerateContentConfig(
+                temperature=self.config.temperature,
+                max_output_tokens=self.config.max_output_tokens,
+                thinking_config=types.ThinkingConfig(thinking_budget=1024)
+            )
         
-        # Add action specification
-        prompt_parts.append(f"\n## Action Specification\n{action_spec}")
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=contents,
+            config=gen_config,
+        )
         
-        # Add generation instructions
-        prompt_parts.append(f"""
-## Generation Instructions
-
-Generate {n_tools} different tool design(s). For each tool, generate {n_actions} action sequence(s).
-
-For each tool-action pair, output:
-1. Tool description (brief text)
-2. Tool URDF (in ```xml``` code block)
-3. Action description (brief text)  
-4. Action waypoints as numpy array (in ```python``` code block)
-
-Use this exact format for each design:
-
-### Design [N]
-
-**Tool Description:** [describe the tool]
-
-**Tool URDF:**
-```xml
-<link name="tool_part_1">
-  ...
-</link>
-<joint name="tool_joint_1" type="fixed">
-  ...
-</joint>
-```
-
-**Action Description:** [describe how to use the tool]
-
-**Action Waypoints:**
-```python
-action = np.array([
-    [x, y, z, roll, pitch, yaw, gripper],
-    [x, y, z, roll, pitch, yaw, gripper],
-    ...
-])
-```
-""")
-        
-        # Add evolution context if provided
-        if previous_designs and evolution_prompt:
-            prompt_parts.append(f"\n## Previous Designs\n")
-            for i, design in enumerate(previous_designs):
-                prompt_parts.append(f"""
-### Previous Design {i+1} (reward: {design.get('reward', 'N/A')})
-Tool: {design.get('tool_description', 'N/A')}
-```xml
-{design.get('tool_urdf', '')}
-```
-""")
-            prompt_parts.append(f"\n## Evolution Instructions\n{evolution_prompt}")
-        
-        return "\n".join(prompt_parts)
+        return response.text
     
-    def generate_designs(
+    def generate_tool_designs(
         self,
         task_description: str,
         environment_code: str,
-        frame_description: str,
-        system_prompt: str,
-        tool_spec: str,
-        action_spec: str,
         scene_image: Optional[Image.Image] = None,
-        n_tools: int = 1,
-        n_actions: int = 1,
+        n_tools: int = 3,
+        n_actions: int = 3,
         previous_designs: Optional[List[Dict]] = None,
-        evolution_prompt: Optional[str] = None,
     ) -> List[ToolActionDesign]:
         """
-        Generate tool and action designs.
+        Generate tool and action designs for a task.
         
         Args:
             task_description: Description of the task
-            environment_code: Python code showing environment setup
-            frame_description: Coordinate frame description
-            system_prompt: System/mission introduction
-            tool_spec: Tool specification prompt
-            action_spec: Action specification prompt
-            scene_image: Optional scene image
-            n_tools: Number of tools to generate
-            n_actions: Number of actions per tool
+            environment_code: Code showing environment setup
+            scene_image: Image of the scene
+            n_tools: Number of tool designs to generate
+            n_actions: Number of action sequences per tool
             previous_designs: Previous designs for evolution
-            evolution_prompt: Evolution instructions
             
         Returns:
             List of ToolActionDesign objects
         """
-        # Build prompt
         prompt = self._build_prompt(
             task_description=task_description,
             environment_code=environment_code,
-            frame_description=frame_description,
-            system_prompt=system_prompt,
-            tool_spec=tool_spec,
-            action_spec=action_spec,
             n_tools=n_tools,
             n_actions=n_actions,
             previous_designs=previous_designs,
-            evolution_prompt=evolution_prompt,
         )
         
-        # Prepare content
-        content = []
-        if scene_image is not None:
-            content.append(scene_image)
-        content.append(prompt)
-        
         # Generate response
-        response = self.model.generate_content(content)
-        response_text = response.text
-        
-        # Debug output (only in verbose mode)
-        # print(f"VLM Response: {len(response_text)} chars")
+        response_text = self.generate_content(prompt, scene_image)
         
         # Parse response into designs
         designs = self._parse_response(response_text, n_tools, n_actions)
         
         return designs
     
+    def _build_prompt(
+        self,
+        task_description: str,
+        environment_code: str,
+        n_tools: int,
+        n_actions: int,
+        previous_designs: Optional[List[Dict]] = None,
+    ) -> str:
+        """Build the full prompt for tool generation."""
+        from .prompts.system import INITIAL_MISSION_PROMPT, EVOLUTION_MISSION_PROMPT, PROCEDURE_PROMPT
+        from .prompts.tool_spec import TOOL_SPECIFICATION_PROMPT
+        from .prompts.action_spec import ACTION_SPECIFICATION_PROMPT, FRAME_CLARIFICATION_PROMPT
+        
+        # Choose mission prompt based on whether we have previous designs
+        if previous_designs:
+            mission = EVOLUTION_MISSION_PROMPT
+            evolution_context = self._format_previous_designs(previous_designs)
+        else:
+            mission = INITIAL_MISSION_PROMPT
+            evolution_context = ""
+        
+        prompt = f"""{mission}
+
+{PROCEDURE_PROMPT}
+
+## Task Description
+{task_description}
+
+## Environment Code
+```python
+{environment_code}
+```
+
+{TOOL_SPECIFICATION_PROMPT}
+
+{ACTION_SPECIFICATION_PROMPT}
+
+{FRAME_CLARIFICATION_PROMPT}
+
+{evolution_context}
+
+## Your Task
+
+Generate {n_tools} different tool designs. For each tool, generate {n_actions} different action sequences.
+
+For each tool design:
+1. First describe your strategy and the tool design
+2. Output the tool URDF in a ```xml code block
+3. For each action sequence, describe the approach then output the waypoints as a numpy array in a ```python code block
+
+Be creative and diverse in your designs! Each tool should have a different approach to solving the task.
+"""
+        return prompt
+    
+    def _format_previous_designs(self, designs: List[Dict]) -> str:
+        """Format previous designs for evolution prompt."""
+        if not designs:
+            return ""
+        
+        text = "\n## Previous Designs (for evolution)\n\n"
+        text += "Learn from these designs. Mutate or combine them to create better solutions.\n\n"
+        
+        for i, design in enumerate(designs):
+            reward = design.get("reward", 0)
+            desc = design.get("description", "")[:200]
+            text += f"### Design {i+1} (reward: {reward:.3f})\n"
+            text += f"{desc}\n\n"
+        
+        return text
+    
     def _parse_response(
         self,
         response: str,
-        expected_tools: int,
-        expected_actions: int
+        n_tools: int,
+        n_actions: int
     ) -> List[ToolActionDesign]:
-        """
-        Parse VLM response into tool-action designs.
-        
-        Args:
-            response: Raw VLM response text
-            expected_tools: Expected number of tools
-            expected_actions: Expected actions per tool
-            
-        Returns:
-            List of parsed designs
-        """
+        """Parse the VLM response into tool-action designs."""
         designs = []
         
-        # Split by design markers
-        design_sections = self._split_into_sections(response)
+        # Extract all tools from response
+        tools = extract_tool_from_response(response)
         
-        for section in design_sections:
-            # Extract tool URDF
-            tool_urdf = extract_tool_from_response(section)
-            if tool_urdf is None:
+        # Extract all action sequences
+        all_actions = extract_actions_from_response(response)
+        
+        # Match tools with actions
+        for i, tool_urdf in enumerate(tools):
+            if not validate_tool_urdf(tool_urdf):
                 continue
             
-            # Validate tool
-            validation = validate_tool_urdf(tool_urdf)
-            if not validation.valid:
-                continue
+            # Get corresponding actions
+            start_idx = i * n_actions
+            end_idx = min(start_idx + n_actions, len(all_actions))
+            tool_actions = all_actions[start_idx:end_idx] if start_idx < len(all_actions) else []
             
-            # Extract actions
-            actions_list = extract_actions_from_response(section)
-            if actions_list is None:
-                continue
-            
-            actions = np.array(actions_list)
-            
-            # Ensure actions have 7 columns (add gripper=0 if needed)
-            if actions.shape[1] == 6:
-                gripper_col = np.zeros((actions.shape[0], 1))
-                actions = np.hstack([actions, gripper_col])
-            
-            # Extract descriptions
-            tool_desc = self._extract_description(section, "Tool Description")
-            action_desc = self._extract_description(section, "Action Description")
-            
-            designs.append(ToolActionDesign(
-                tool_urdf=tool_urdf,
-                actions=actions,
-                tool_description=tool_desc,
-                action_description=action_desc,
-                raw_response=section
-            ))
+            # Create design for each action sequence
+            for actions in tool_actions:
+                if actions is not None and len(actions) > 0:
+                    designs.append(ToolActionDesign(
+                        tool_urdf=tool_urdf,
+                        actions=actions,
+                        raw_response=response[:500],
+                    ))
+        
+        # If no proper matches, try to create designs from whatever we found
+        if not designs:
+            for tool_urdf in tools:
+                if validate_tool_urdf(tool_urdf):
+                    for actions in all_actions:
+                        if actions is not None and len(actions) > 0:
+                            designs.append(ToolActionDesign(
+                                tool_urdf=tool_urdf,
+                                actions=actions,
+                                raw_response=response[:500],
+                            ))
         
         return designs
-    
-    def _split_into_sections(self, response: str) -> List[str]:
-        """Split response into design sections."""
-        import re
-        
-        # Try splitting by "Design" headers
-        pattern = r'###?\s*Design\s*\[?\d+\]?'
-        parts = re.split(pattern, response, flags=re.IGNORECASE)
-        
-        # Filter empty parts
-        sections = [p.strip() for p in parts if p.strip()]
-        
-        # If no sections found, treat entire response as one section
-        if not sections:
-            sections = [response]
-        
-        return sections
-    
-    def _extract_description(self, text: str, marker: str) -> str:
-        """Extract a description following a marker."""
-        import re
-        
-        pattern = rf'\*?\*?{marker}:?\*?\*?\s*(.+?)(?:\n\n|\*\*|```|$)'
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        
-        if match:
-            return match.group(1).strip()
-        return ""
 
 
 class VLMClient:
     """
-    High-level VLM client that manages multiple agents.
-    
-    Supports parallel queries for population generation.
+    Main VLM client interface for VLMgineer.
     """
     
     def __init__(self, config: Optional[VLMConfig] = None):
-        """
-        Initialize the VLM client.
-        
-        Args:
-            config: VLM configuration
-        """
+        """Initialize the VLM client."""
         self.config = config or VLMConfig()
-        self.gemini = GeminiClient(self.config)
+        self.client = GeminiClient(config=self.config)
     
     def sample_population(
         self,
@@ -361,53 +297,204 @@ class VLMClient:
         tool_spec: str,
         action_spec: str,
         scene_image: Optional[Image.Image] = None,
-        n_agents: int = 1,
-        n_tools: int = 1,
-        n_actions: int = 1,
+        n_agents: int = 3,
+        n_tools: int = 3,
+        n_actions: int = 3,
         previous_designs: Optional[List[Dict]] = None,
         evolution_prompt: Optional[str] = None,
     ) -> List[ToolActionDesign]:
         """
-        Sample a population of designs from multiple agents.
+        Sample a population of tool-action designs.
+        
+        This is the main interface called by the evolution engine.
         
         Args:
-            task_description: Description of the task
+            task_description: Description of the manipulation task
             environment_code: Python code showing environment setup
-            frame_description: Coordinate frame description
-            system_prompt: System/mission introduction
+            frame_description: Description of coordinate frames
+            system_prompt: System prompt for the VLM
             tool_spec: Tool specification prompt
             action_spec: Action specification prompt
-            scene_image: Optional scene image
+            scene_image: PIL Image of the current scene
             n_agents: Number of parallel agents
-            n_tools: Tools per agent
-            n_actions: Actions per tool
-            previous_designs: Previous designs for evolution
-            evolution_prompt: Evolution instructions
+            n_tools: Number of tool designs per agent
+            n_actions: Number of action sequences per tool
+            previous_designs: Previous designs for evolutionary refinement
+            evolution_prompt: Additional prompt for evolution
             
         Returns:
-            List of all generated designs
+            List of ToolActionDesign objects
         """
         all_designs = []
         
-        # Query each agent (could be parallelized with asyncio)
-        for i in range(n_agents):
+        # Each agent generates designs in parallel (conceptually)
+        for agent_idx in range(n_agents):
+            # Build the full prompt
+            prompt = self._build_full_prompt(
+                task_description=task_description,
+                environment_code=environment_code,
+                frame_description=frame_description,
+                system_prompt=system_prompt,
+                tool_spec=tool_spec,
+                action_spec=action_spec,
+                n_tools=n_tools,
+                n_actions=n_actions,
+                previous_designs=previous_designs,
+                evolution_prompt=evolution_prompt,
+                agent_idx=agent_idx,
+            )
+            
             try:
-                designs = self.gemini.generate_designs(
-                    task_description=task_description,
-                    environment_code=environment_code,
-                    frame_description=frame_description,
-                    system_prompt=system_prompt,
-                    tool_spec=tool_spec,
-                    action_spec=action_spec,
-                    scene_image=scene_image,
-                    n_tools=n_tools,
-                    n_actions=n_actions,
-                    previous_designs=previous_designs,
-                    evolution_prompt=evolution_prompt,
-                )
+                # Generate response
+                response_text = self.client.generate_content(prompt, scene_image)
+                
+                # Parse response into designs
+                designs = self._parse_response(response_text, n_tools, n_actions)
                 all_designs.extend(designs)
+                
             except Exception as e:
-                print(f"Agent {i} failed: {e}")
+                print(f"  Agent {agent_idx + 1} failed: {e}")
                 continue
         
         return all_designs
+    
+    def _build_full_prompt(
+        self,
+        task_description: str,
+        environment_code: str,
+        frame_description: str,
+        system_prompt: str,
+        tool_spec: str,
+        action_spec: str,
+        n_tools: int,
+        n_actions: int,
+        previous_designs: Optional[List[Dict]],
+        evolution_prompt: Optional[str],
+        agent_idx: int,
+    ) -> str:
+        """Build the full prompt for the VLM."""
+        
+        # Evolution context
+        evolution_context = ""
+        if previous_designs:
+            evolution_context = "\n## Previous Designs (learn from these)\n\n"
+            for i, design in enumerate(previous_designs[:5]):  # Top 5
+                reward = design.get("reward", 0)
+                desc = design.get("description", "")[:300]
+                evolution_context += f"### Design {i+1} (reward: {reward:.3f})\n{desc}\n\n"
+            
+            if evolution_prompt:
+                evolution_context += f"\n{evolution_prompt}\n"
+        
+        prompt = f"""{system_prompt}
+
+## Task Description
+{task_description}
+
+## Environment Code
+```python
+{environment_code}
+```
+
+## Coordinate Frames
+{frame_description}
+
+{tool_spec}
+
+{action_spec}
+
+{evolution_context}
+
+## Your Task (Agent {agent_idx + 1})
+
+Generate {n_tools} different tool designs. For each tool, generate {n_actions} different action sequences.
+
+For each tool design:
+1. First describe your strategy and the tool design briefly
+2. Output the tool URDF in a ```xml code block
+3. For each action sequence, describe the approach then output the waypoints as a numpy array in a ```python code block
+
+Be creative and diverse! Each tool should try a different approach to solving the task.
+Ensure waypoints are within the robot's workspace (radius ~0.8m from origin).
+"""
+        return prompt
+    
+    def _parse_response(
+        self,
+        response: str,
+        n_tools: int,
+        n_actions: int
+    ) -> List[ToolActionDesign]:
+        """Parse the VLM response into tool-action designs."""
+        designs = []
+        
+        # Extract all tools from response
+        tools = extract_tool_from_response(response)
+        
+        # Extract all action sequences
+        all_actions = extract_actions_from_response(response)
+        
+        # Match tools with actions
+        for i, tool_urdf in enumerate(tools):
+            if not validate_tool_urdf(tool_urdf):
+                continue
+            
+            # Get corresponding actions
+            start_idx = i * n_actions
+            end_idx = min(start_idx + n_actions, len(all_actions))
+            tool_actions = all_actions[start_idx:end_idx] if start_idx < len(all_actions) else []
+            
+            # Create design for each action sequence
+            for actions in tool_actions:
+                if actions is not None and len(actions) > 0:
+                    designs.append(ToolActionDesign(
+                        tool_urdf=tool_urdf,
+                        actions=actions,
+                        raw_response=response[:500],
+                    ))
+        
+        # If no proper matches, try to create designs from whatever we found
+        if not designs:
+            for tool_urdf in tools:
+                if validate_tool_urdf(tool_urdf):
+                    for actions in all_actions:
+                        if actions is not None and len(actions) > 0:
+                            designs.append(ToolActionDesign(
+                                tool_urdf=tool_urdf,
+                                actions=actions,
+                                raw_response=response[:500],
+                            ))
+        
+        return designs
+    
+    def generate_designs(
+        self,
+        task_description: str,
+        environment_code: str,
+        scene_image: Optional[Image.Image] = None,
+        n_tools: int = 3,
+        n_actions: int = 3,
+        previous_designs: Optional[List[Dict]] = None,
+    ) -> List[ToolActionDesign]:
+        """
+        Generate tool and action designs (legacy interface).
+        
+        Args:
+            task_description: Description of the manipulation task
+            environment_code: Python code showing environment setup
+            scene_image: PIL Image of the current scene
+            n_tools: Number of tool designs to generate
+            n_actions: Number of action sequences per tool
+            previous_designs: Previous designs for evolutionary refinement
+            
+        Returns:
+            List of ToolActionDesign objects
+        """
+        return self.client.generate_tool_designs(
+            task_description=task_description,
+            environment_code=environment_code,
+            scene_image=scene_image,
+            n_tools=n_tools,
+            n_actions=n_actions,
+            previous_designs=previous_designs,
+        )

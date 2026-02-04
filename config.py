@@ -3,7 +3,7 @@
 VLMgineer Configuration
 =============================================================================
 
-Edit this file to configure your VLMgineer run, then execute:
+Edit this file to configure your run, then execute:
     uv run main.py
 
 """
@@ -41,8 +41,9 @@ ACTIONS_PER_TOOL = 3
 # =============================================================================
 
 # Gemini model to use
-# Options: "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-3-pro-preview", etc.
-MODEL = "gemini-3-pro-preview"
+# "gemini-robotics-er-1.5-preview" - Specialized for robotics (best for tool design)
+# "gemini-2.0-flash" - Fast general model
+MODEL = "gemini-robotics-er-1.5-preview"
 
 # Temperature (0.0 = deterministic, 1.0 = creative)
 TEMPERATURE = 0.8
@@ -66,11 +67,3 @@ VERBOSE = True
 
 # Directory to save results
 OUTPUT_DIR = "vlmgineer_results"
-
-# =============================================================================
-# API KEY
-# =============================================================================
-
-# Your Gemini API key (or set in .env file as API_KEY or GOOGLE_API_KEY)
-# Leave as None to load from .env file
-API_KEY = None

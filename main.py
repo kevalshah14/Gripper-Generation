@@ -4,22 +4,22 @@
 VLMgineer - Vision Language Models as Robotic Toolsmiths
 =============================================================================
 
-Edit config.py to configure your run, then execute:
-    uv run main.py
+1. Edit config.py to set your preferences
+2. Run: uv run main.py
 
-Or run with command-line overrides:
-    uv run main.py --task drill_press --iterations 5 --gui
+Or use command-line overrides:
+    uv run main.py --task drill_press --gui
 """
 
 import argparse
 import sys
 import os
 
-# Import config
-import config
-
 
 def main():
+    # Import user config
+    import config
+    
     parser = argparse.ArgumentParser(
         description="VLMgineer: AI-powered robotic tool design",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -27,128 +27,29 @@ def main():
 Examples:
   uv run main.py                          # Use settings from config.py
   uv run main.py --task drill_press       # Override task
-  uv run main.py --iterations 5 --gui     # More iterations with GUI
+  uv run main.py --gui                    # Show PyBullet GUI
   uv run main.py --demo                   # Quick demo (no API needed)
-  uv run main.py --evaluate results.json  # Visualize a saved design
+  uv run main.py --evaluate result.json   # Visualize a saved design
         """
     )
     
-    # Task selection
-    parser.add_argument(
-        "--task", "-t",
-        type=str,
-        default=config.TASK,
-        choices=["bring_cube", "drill_press", "lift_box", "move_ball", "clean_table"],
-        help=f"Task to solve (default: {config.TASK})"
-    )
-    
-    # Evolution parameters
-    parser.add_argument(
-        "--iterations", "-i",
-        type=int,
-        default=config.ITERATIONS,
-        help=f"Number of evolution iterations (default: {config.ITERATIONS})"
-    )
-    parser.add_argument(
-        "--agents", "-a",
-        type=int,
-        default=config.AGENTS,
-        help=f"Number of parallel VLM agents (default: {config.AGENTS})"
-    )
-    parser.add_argument(
-        "--tools",
-        type=int,
-        default=config.TOOLS_PER_AGENT,
-        help=f"Tools per agent (default: {config.TOOLS_PER_AGENT})"
-    )
-    parser.add_argument(
-        "--actions",
-        type=int,
-        default=config.ACTIONS_PER_TOOL,
-        help=f"Actions per tool (default: {config.ACTIONS_PER_TOOL})"
-    )
-    
-    # Display options
-    parser.add_argument(
-        "--gui", "-g",
-        action="store_true",
-        default=config.SHOW_GUI,
-        help="Show PyBullet GUI window"
-    )
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        default=config.VERBOSE,
-        help="Print detailed progress"
-    )
-    
-    # Special modes
-    parser.add_argument(
-        "--demo",
-        action="store_true",
-        help="Run demo mode with example tool (no API needed)"
-    )
-    parser.add_argument(
-        "--evaluate", "-e",
-        type=str,
-        help="Evaluate a saved design file (JSON)"
-    )
+    parser.add_argument("--task", "-t", type=str, default=config.TASK,
+        choices=["bring_cube", "drill_press", "lift_box", "move_ball", "clean_table"])
+    parser.add_argument("--iterations", "-i", type=int, default=config.ITERATIONS)
+    parser.add_argument("--agents", "-a", type=int, default=config.AGENTS)
+    parser.add_argument("--tools", type=int, default=config.TOOLS_PER_AGENT)
+    parser.add_argument("--actions", type=int, default=config.ACTIONS_PER_TOOL)
+    parser.add_argument("--gui", "-g", action="store_true", default=config.SHOW_GUI)
+    parser.add_argument("--verbose", "-v", action="store_true", default=config.VERBOSE)
+    parser.add_argument("--demo", action="store_true", help="Demo mode (no API needed)")
+    parser.add_argument("--evaluate", "-e", type=str, help="Evaluate a saved design")
     
     args = parser.parse_args()
     
-    # Update vlmgineer config from our settings
-    from vlmgineer.config import VLMConfig, EvolutionConfig, SimulationConfig, VLMgineerConfig
-    
-    # Load API key
-    api_key = config.API_KEY
-    if api_key is None:
-        # Try to load from environment or .env
-        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("API_KEY")
-        if api_key is None:
-            env_file = os.path.join(os.path.dirname(__file__), ".env")
-            if os.path.exists(env_file):
-                with open(env_file) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#') and '=' in line:
-                            k, v = line.split('=', 1)
-                            k = k.strip()
-                            v = v.strip().strip('"').strip("'")
-                            if k in ("API_KEY", "GOOGLE_API_KEY"):
-                                api_key = v
-                                break
-    
-    # Create config
-    vlm_config = VLMConfig(
-        api_key=api_key,
-        model_name=config.MODEL,
-        temperature=config.TEMPERATURE,
-        max_output_tokens=config.MAX_TOKENS,
-    )
-    
-    evolution_config = EvolutionConfig(
-        n_agents=args.agents,
-        n_tools=args.tools,
-        n_actions=args.actions,
-        n_iterations=args.iterations,
-    )
-    
-    sim_config = SimulationConfig(
-        gui=args.gui,
-    )
-    
-    full_config = VLMgineerConfig(
-        vlm=vlm_config,
-        evolution=evolution_config,
-        simulation=sim_config,
-        output_dir=config.OUTPUT_DIR,
-        verbose=args.verbose,
-    )
-    
-    # Import here to avoid slow startup for --help
+    # Imports (slow, so do after arg parsing)
+    from vlmgineer.config import VLMConfig, EvolutionConfig, SimulationConfig, VLMgineerConfig, _load_api_key
     from vlmgineer.envs import get_task_env, ToolActionPair
     from vlmgineer.evolution import VLMgineerEvolution
-    from vlmgineer.runner import SimulationRunner
     import numpy as np
     import json
     import pybullet as p
@@ -162,155 +63,131 @@ Examples:
     
     # === DEMO MODE ===
     if args.demo:
-        print("Running demo mode with example tool...")
-        print("(No API key needed)\n")
+        print("Demo mode - example tool (no API needed)\n")
         
         env = get_task_env(args.task, gui=args.gui)
         
-        # Simple example tool
-        example_tool = """
-<link name="pusher_arm">
-  <inertial><origin xyz="0 0 0"/><mass value="0.005"/>
-    <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial>
-  <visual><origin xyz="0.12 0 0"/>
-    <geometry><box size="0.24 0.02 0.02"/></geometry>
-    <material name="grey"><color rgba="0.5 0.5 0.55 1"/></material></visual>
-  <collision><origin xyz="0.12 0 0"/>
-    <geometry><box size="0.24 0.02 0.02"/></geometry></collision>
-</link>
-<link name="pusher_blade">
-  <inertial><origin xyz="0 0 0"/><mass value="0.003"/>
-    <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial>
-  <visual><origin xyz="0 0 -0.03"/>
-    <geometry><box size="0.02 0.08 0.06"/></geometry>
-    <material name="blue"><color rgba="0.2 0.2 0.8 1"/></material></visual>
-  <collision><origin xyz="0 0 -0.03"/>
-    <geometry><box size="0.02 0.08 0.06"/></geometry></collision>
-</link>
-<joint name="arm_joint" type="fixed">
-  <origin xyz="0 0 0"/><parent link="tool_mount"/><child link="pusher_arm"/></joint>
-<joint name="blade_joint" type="fixed">
-  <origin xyz="0.24 0 0"/><parent link="pusher_arm"/><child link="pusher_blade"/></joint>
+        tool = """
+<link name="arm"><inertial><origin xyz="0 0 0"/><mass value="0.005"/>
+  <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial>
+  <visual><origin xyz="0.12 0 0"/><geometry><box size="0.24 0.02 0.02"/></geometry>
+  <material name="grey"><color rgba="0.5 0.5 0.55 1"/></material></visual>
+  <collision><origin xyz="0.12 0 0"/><geometry><box size="0.24 0.02 0.02"/></geometry></collision></link>
+<link name="blade"><inertial><origin xyz="0 0 0"/><mass value="0.003"/>
+  <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial>
+  <visual><origin xyz="0 0 -0.03"/><geometry><box size="0.02 0.08 0.06"/></geometry>
+  <material name="blue"><color rgba="0.2 0.2 0.8 1"/></material></visual>
+  <collision><origin xyz="0 0 -0.03"/><geometry><box size="0.02 0.08 0.06"/></geometry></collision></link>
+<joint name="arm_j" type="fixed"><origin xyz="0 0 0"/><parent link="tool_mount"/><child link="arm"/></joint>
+<joint name="blade_j" type="fixed"><origin xyz="0.24 0 0"/><parent link="arm"/><child link="blade"/></joint>
 """
-        
-        example_actions = np.array([
-            [0.35, 0.0, 0.30, 0.0, 0.3, 0.0, 0.0],
-            [0.50, 0.0, 0.20, 0.0, 0.6, 0.0, 0.0],
-            [0.60, 0.0, 0.12, 0.0, 0.8, 0.0, 0.0],
-            [0.45, 0.0, 0.12, 0.0, 0.8, 0.0, 0.0],
-            [0.35, 0.0, 0.25, 0.0, 0.3, 0.0, 0.0],
+        actions = np.array([
+            [0.35, 0.0, 0.30, 0, 0.3, 0, 0],
+            [0.50, 0.0, 0.20, 0, 0.6, 0, 0],
+            [0.60, 0.0, 0.12, 0, 0.8, 0, 0],
+            [0.45, 0.0, 0.12, 0, 0.8, 0, 0],
+            [0.35, 0.0, 0.25, 0, 0.3, 0, 0],
         ])
         
         env.connect()
-        env.load_robot(example_tool)
+        env.load_robot(tool)
         env.setup_environment()
         
-        tool_action = ToolActionPair(tool_urdf=example_tool, actions=example_actions)
-        result = env.evaluate(tool_action, max_steps=600)
-        
-        print(f"Demo Results:")
-        print(f"  Reward: {result.reward:.3f}")
-        print(f"  Success: {result.success}")
+        result = env.evaluate(ToolActionPair(tool_urdf=tool, actions=actions), max_steps=600)
+        print(f"Result: reward={result.reward:.3f}, success={result.success}")
         
         if args.gui:
-            print("\nGUI window open. Close it to exit.")
+            print("\nClose PyBullet window to exit.")
             try:
                 while p.isConnected():
                     p.stepSimulation()
                     time.sleep(1/60)
-            except:
-                pass
-        
+            except: pass
         env.disconnect()
         return
     
     # === EVALUATE MODE ===
     if args.evaluate:
-        print(f"Evaluating saved design: {args.evaluate}\n")
+        print(f"Evaluating: {args.evaluate}\n")
         
-        with open(args.evaluate, 'r') as f:
+        with open(args.evaluate) as f:
             design = json.load(f)
         
-        print(f"Tool: {design.get('tool_description', 'Custom tool')}")
-        print()
+        print(f"Tool: {design.get('tool_description', 'Custom')}\n")
         
         env = get_task_env(args.task, gui=args.gui)
         env.connect()
         env.load_robot(design["tool_urdf"])
         env.setup_environment()
         
-        tool_action = ToolActionPair(
-            tool_urdf=design["tool_urdf"],
-            actions=np.array(design["actions"]),
+        result = env.evaluate(
+            ToolActionPair(tool_urdf=design["tool_urdf"], actions=np.array(design["actions"])),
+            max_steps=800
         )
-        
-        result = env.evaluate(tool_action, max_steps=800)
-        
-        print(f"Results:")
-        print(f"  Reward: {result.reward:.3f}")
-        print(f"  Success: {result.success}")
+        print(f"Result: reward={result.reward:.3f}, success={result.success}")
         
         if args.gui:
-            print("\nGUI window open. Close it to exit.")
+            print("\nClose PyBullet window to exit.")
             try:
                 while p.isConnected():
                     p.stepSimulation()
                     time.sleep(1/60)
-            except:
-                pass
-        
+            except: pass
         env.disconnect()
         return
     
-    # === EVOLUTION MODE (main) ===
+    # === EVOLUTION MODE ===
+    api_key = _load_api_key()
     if not api_key:
         print("ERROR: No API key found!")
-        print("Set API_KEY in config.py or .env file")
+        print("Add API_KEY=your_key to .env file")
         sys.exit(1)
     
-    print("Initializing VLMgineer...")
-    
-    env = get_task_env(args.task, gui=args.gui)
-    
-    engine = VLMgineerEvolution(
-        env=env,
-        config=full_config,
+    # Build config from settings
+    full_config = VLMgineerConfig(
+        vlm=VLMConfig(
+            api_key=api_key,
+            model_name=config.MODEL,
+            temperature=config.TEMPERATURE,
+            max_output_tokens=config.MAX_TOKENS,
+        ),
+        evolution=EvolutionConfig(
+            n_agents=args.agents,
+            n_tools=args.tools,
+            n_actions=args.actions,
+            n_iterations=args.iterations,
+        ),
+        simulation=SimulationConfig(gui=args.gui),
+        output_dir=config.OUTPUT_DIR,
+        verbose=args.verbose,
     )
     
-    print()
-    print("Starting evolutionary search...")
-    print(f"  Iterations: {args.iterations}")
-    print(f"  Agents: {args.agents}")
-    print(f"  Tools/agent: {args.tools}")
-    print(f"  Actions/tool: {args.actions}")
-    print(f"  Total samples/iteration: {args.agents * args.tools * args.actions}")
+    print(f"Model: {config.MODEL}")
+    print(f"Iterations: {args.iterations}")
+    print(f"Samples/iteration: {args.agents * args.tools * args.actions}")
     print()
     
+    env = get_task_env(args.task, gui=args.gui)
+    engine = VLMgineerEvolution(env=env, config=full_config)
+    
     try:
-        best_design = engine.run()
+        best = engine.run()
         
-        print()
-        print("=" * 60)
-        print("Evolution Complete!")
+        print("\n" + "=" * 60)
+        print("Complete!")
         print("=" * 60)
         
-        if best_design:
-            print(f"Best reward: {best_design.reward:.3f}")
-            print(f"Best tool: {best_design.tool_description[:100]}...")
-            
-            # Save result
-            output_file = os.path.join(
-                config.OUTPUT_DIR,
-                f"best_{args.task}.json"
-            )
-            engine.save_results(output_file)
-            print(f"\nSaved to: {output_file}")
-            print(f"\nTo visualize: uv run main.py --task {args.task} --evaluate {output_file} --gui")
+        if best:
+            print(f"Best reward: {best.reward:.3f}")
+            output = os.path.join(config.OUTPUT_DIR, f"best_{args.task}.json")
+            engine.save_results(config.OUTPUT_DIR)
+            print(f"\nSaved to: {output}")
+            print(f"Visualize: uv run main.py --task {args.task} --evaluate {output} --gui")
         else:
-            print("No successful designs found. Try increasing iterations or check API quota.")
+            print("No successful designs. Try more iterations or check API quota.")
             
     except KeyboardInterrupt:
-        print("\n\nInterrupted by user.")
+        print("\n\nStopped.")
     finally:
         env.disconnect()
 
