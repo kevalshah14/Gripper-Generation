@@ -86,9 +86,9 @@ class EvolutionState:
         rewards = [d.reward for d in designs]
         self.rewards_per_iteration.append(rewards)
         
-        # Update best
+        # Update best (use >= to capture first design even if reward is 0)
         for design in designs:
-            if design.reward > self.best_reward:
+            if self.best_design is None or design.reward > self.best_reward:
                 self.best_reward = design.reward
                 self.best_design = design
         
@@ -347,12 +347,17 @@ class VLMgineerEvolution:
         # Save best design
         if self.state.best_design:
             best_path = os.path.join(output_dir, f"best_design_{timestamp}.json")
+            # Safe tolist conversion
+            actions_list = self.state.best_design.design.actions
+            if hasattr(actions_list, 'tolist'):
+                actions_list = actions_list.tolist()
+                
             with open(best_path, 'w') as f:
                 json.dump({
                     "reward": float(self.state.best_design.reward),
                     "success": bool(self.state.best_design.success),
                     "tool_urdf": self.state.best_design.design.tool_urdf,
-                    "actions": self.state.best_design.design.actions.tolist(),
+                    "actions": actions_list,
                     "tool_description": self.state.best_design.design.tool_description,
                 }, f, indent=2)
             print(f"Saved best design to {best_path}")
@@ -374,13 +379,18 @@ class VLMgineerEvolution:
             all_path = os.path.join(output_dir, f"all_designs_{timestamp}.json")
             all_designs_data = []
             for d in self.state.all_designs:
+                # Safe tolist conversion
+                actions_list = d.design.actions
+                if hasattr(actions_list, 'tolist'):
+                    actions_list = actions_list.tolist()
+                    
                 all_designs_data.append({
                     "iteration": int(d.iteration),
                     "design_id": int(d.design_id),
                     "reward": float(d.reward),
                     "success": bool(d.success),
                     "tool_urdf": d.design.tool_urdf,
-                    "actions": d.design.actions.tolist(),
+                    "actions": actions_list,
                 })
             with open(all_path, 'w') as f:
                 json.dump(all_designs_data, f, indent=2)

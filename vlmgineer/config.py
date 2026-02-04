@@ -55,7 +55,7 @@ class VLMConfig:
     api_key: Optional[str] = field(default_factory=_load_api_key)
     model_name: str = "gemini-robotics-er-1.5-preview"  # Specialized for robotics
     temperature: float = 0.5  # Lower for robotics tasks
-    max_output_tokens: int = 16384
+    max_output_tokens: int = 4096  # Reduced for faster generation
     
     def validate(self) -> None:
         if not self.api_key:

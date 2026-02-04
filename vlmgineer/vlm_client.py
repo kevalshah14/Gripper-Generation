@@ -104,12 +104,12 @@ class GeminiClient:
             max_output_tokens=self.config.max_output_tokens,
         )
         
-        # For robotics model, use thinking for better spatial reasoning
+        # For robotics model, use minimal thinking for speed
         if "robotics" in self.model_name.lower():
             gen_config = types.GenerateContentConfig(
                 temperature=self.config.temperature,
                 max_output_tokens=self.config.max_output_tokens,
-                thinking_config=types.ThinkingConfig(thinking_budget=1024)
+                thinking_config=types.ThinkingConfig(thinking_budget=256)
             )
         
         response = self.client.models.generate_content(
@@ -257,9 +257,12 @@ Be creative and diverse in your designs! Each tool should have a different appro
             # Create design for each action sequence
             for actions in tool_actions:
                 if actions is not None and len(actions) > 0:
+                    # Convert to numpy array
+                    actions_array = np.array(actions)
+                    
                     designs.append(ToolActionDesign(
                         tool_urdf=tool_urdf,
-                        actions=actions,
+                        actions=actions_array,
                         raw_response=response[:500],
                     ))
         
@@ -269,9 +272,12 @@ Be creative and diverse in your designs! Each tool should have a different appro
                 if validate_tool_urdf(tool_urdf):
                     for actions in all_actions:
                         if actions is not None and len(actions) > 0:
+                            # Convert to numpy array
+                            actions_array = np.array(actions)
+                            
                             designs.append(ToolActionDesign(
                                 tool_urdf=tool_urdf,
-                                actions=actions,
+                                actions=actions_array,
                                 raw_response=response[:500],
                             ))
         
@@ -372,31 +378,19 @@ class VLMClient:
         evolution_prompt: Optional[str],
         agent_idx: int,
     ) -> str:
-        """Build the full prompt for the VLM."""
+        """Build a minimal prompt for fast generation."""
         
-        # Evolution context
+        # Evolution context (brief)
         evolution_context = ""
         if previous_designs:
-            evolution_context = "\n## Previous Designs (learn from these)\n\n"
-            for i, design in enumerate(previous_designs[:5]):  # Top 5
-                reward = design.get("reward", 0)
-                desc = design.get("description", "")[:300]
-                evolution_context += f"### Design {i+1} (reward: {reward:.3f})\n{desc}\n\n"
-            
-            if evolution_prompt:
-                evolution_context += f"\n{evolution_prompt}\n"
+            evolution_context = "Previous best (reward, description):\n"
+            for d in previous_designs[:3]:
+                evolution_context += f"- {d.get('reward', 0):.2f}: {d.get('description', '')[:100]}\n"
         
         prompt = f"""{system_prompt}
 
-## Task Description
-{task_description}
+Task: {task_description}
 
-## Environment Code
-```python
-{environment_code}
-```
-
-## Coordinate Frames
 {frame_description}
 
 {tool_spec}
@@ -405,18 +399,8 @@ class VLMClient:
 
 {evolution_context}
 
-## Your Task (Agent {agent_idx + 1})
-
-Generate {n_tools} different tool designs. For each tool, generate {n_actions} different action sequences.
-
-For each tool design:
-1. First describe your strategy and the tool design briefly
-2. Output the tool URDF in a ```xml code block
-3. For each action sequence, describe the approach then output the waypoints as a numpy array in a ```python code block
-
-Be creative and diverse! Each tool should try a different approach to solving the task.
-Ensure waypoints are within the robot's workspace (radius ~0.8m from origin).
-"""
+Generate {n_tools} tools, each with {n_actions} action sequences.
+Output ```xml for URDF, ```python for np.array waypoints. No explanations needed."""
         return prompt
     
     def _parse_response(
@@ -447,9 +431,12 @@ Ensure waypoints are within the robot's workspace (radius ~0.8m from origin).
             # Create design for each action sequence
             for actions in tool_actions:
                 if actions is not None and len(actions) > 0:
+                    # Convert to numpy array
+                    actions_array = np.array(actions)
+                    
                     designs.append(ToolActionDesign(
                         tool_urdf=tool_urdf,
-                        actions=actions,
+                        actions=actions_array,
                         raw_response=response[:500],
                     ))
         
@@ -459,9 +446,12 @@ Ensure waypoints are within the robot's workspace (radius ~0.8m from origin).
                 if validate_tool_urdf(tool_urdf):
                     for actions in all_actions:
                         if actions is not None and len(actions) > 0:
+                            # Convert to numpy array
+                            actions_array = np.array(actions)
+                            
                             designs.append(ToolActionDesign(
                                 tool_urdf=tool_urdf,
-                                actions=actions,
+                                actions=actions_array,
                                 raw_response=response[:500],
                             ))
         

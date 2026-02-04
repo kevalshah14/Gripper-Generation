@@ -316,16 +316,18 @@ def create_simple_tool(
     return '\n'.join(urdf_parts)
 
 
-def extract_tool_from_response(response: str) -> Optional[str]:
+def extract_tool_from_response(response: str) -> List[str]:
     """
-    Extract URDF tool definition from a VLM response.
+    Extract URDF tool definitions from a VLM response.
     
     Args:
         response: VLM response text that may contain URDF in code blocks
         
     Returns:
-        Extracted URDF string or None if not found
+        List of extracted URDF strings
     """
+    tools = []
+    
     # Try to find URDF in XML code blocks
     patterns = [
         r'```xml\s*(.*?)\s*```',
@@ -335,24 +337,22 @@ def extract_tool_from_response(response: str) -> Optional[str]:
     
     for pattern in patterns:
         matches = re.findall(pattern, response, re.DOTALL | re.IGNORECASE)
-        if matches:
-            # Return the first match that looks like URDF
-            for match in matches:
-                if '<link' in match or '<joint' in match:
-                    return match.strip()
+        for match in matches:
+            if '<link' in match or '<joint' in match:
+                tools.append(match.strip())
     
-    # Try to extract raw URDF (without code blocks)
-    if '<link' in response and '</link>' in response:
+    # If no code blocks, try to extract raw URDF
+    if not tools and '<link' in response and '</link>' in response:
         # Find the URDF section
         start = response.find('<link')
         end = response.rfind('</joint>') + len('</joint>')
         if start != -1 and end > start:
-            return response[start:end].strip()
-    
-    return None
+            tools.append(response[start:end].strip())
+            
+    return tools
 
 
-def extract_actions_from_response(response: str) -> Optional[List[List[float]]]:
+def extract_actions_from_response(response: str) -> List[List[List[float]]]:
     """
     Extract action waypoints from a VLM response.
     
@@ -360,9 +360,11 @@ def extract_actions_from_response(response: str) -> Optional[List[List[float]]]:
         response: VLM response text that may contain numpy array
         
     Returns:
-        List of waypoints or None if not found
+        List of waypoint sequences (each is a list of waypoints)
     """
     import ast
+    
+    all_actions = []
     
     # First, try to find a numpy array definition with np.array([...])
     # This handles multi-line arrays with comments
@@ -398,27 +400,32 @@ def extract_actions_from_response(response: str) -> Optional[List[List[float]]]:
             # Validate
             if isinstance(waypoints, list) and len(waypoints) > 0:
                 if isinstance(waypoints[0], list) and len(waypoints[0]) >= 6:
-                    print(f"  Extracted {len(waypoints)} waypoints from np.array")
-                    return waypoints
+                    # print(f"  Extracted {len(waypoints)} waypoints from np.array")
+                    all_actions.append(waypoints)
         except Exception as e:
             continue
     
     # Fallback: try to find any nested list that looks like waypoints
-    try:
-        # Find arrays with multiple rows
-        bracket_pattern = r'\[\s*\[[\d\.\-\,\s]+\](?:[\s,]*\[[\d\.\-\,\s]+\])+\s*\]'
-        matches = re.findall(bracket_pattern, response)
-        for match in matches:
-            try:
-                waypoints = ast.literal_eval(match)
-                if isinstance(waypoints, list) and len(waypoints) >= 2:
-                    if isinstance(waypoints[0], list) and len(waypoints[0]) >= 6:
-                        print(f"  Fallback extracted {len(waypoints)} waypoints")
-                        return waypoints
-            except:
-                continue
-    except:
-        pass
+    # Only if we found nothing with np.array
+    if not all_actions:
+        try:
+            # Find arrays with multiple rows
+            bracket_pattern = r'\[\s*\[[\d\.\-\,\s]+\](?:[\s,]*\[[\d\.\-\,\s]+\])+\s*\]'
+            matches = re.findall(bracket_pattern, response)
+            for match in matches:
+                try:
+                    waypoints = ast.literal_eval(match)
+                    if isinstance(waypoints, list) and len(waypoints) >= 2:
+                        if isinstance(waypoints[0], list) and len(waypoints[0]) >= 6:
+                            # print(f"  Fallback extracted {len(waypoints)} waypoints")
+                            all_actions.append(waypoints)
+                except:
+                    continue
+        except:
+            pass
     
-    print("  No valid waypoints found in response")
-    return None
+    if not all_actions:
+        # print("  No valid waypoints found in response")
+        pass
+        
+    return all_actions

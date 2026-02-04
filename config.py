@@ -25,16 +25,16 @@ TASK = "bring_cube"
 # =============================================================================
 
 # Number of evolution iterations (more = better results, slower)
-ITERATIONS = 3
+ITERATIONS = 1
 
 # Number of parallel VLM agents per iteration
-AGENTS = 3
+AGENTS = 1
 
 # Tools generated per agent
-TOOLS_PER_AGENT = 3
+TOOLS_PER_AGENT = 1
 
 # Action sequences per tool
-ACTIONS_PER_TOOL = 3
+ACTIONS_PER_TOOL = 1
 
 # =============================================================================
 # VLM CONFIGURATION

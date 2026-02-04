@@ -177,14 +177,44 @@ Examples:
         print("Complete!")
         print("=" * 60)
         
+        # Always save results (even if all rewards are 0)
+        engine.save_results(config.OUTPUT_DIR)
+        output = os.path.join(config.OUTPUT_DIR, f"best_{args.task}.json")
+        
         if best:
-            print(f"Best reward: {best.reward:.3f}")
-            output = os.path.join(config.OUTPUT_DIR, f"best_{args.task}.json")
-            engine.save_results(config.OUTPUT_DIR)
+            print(f"\nBest reward: {best.reward:.3f}")
+            print(f"Best design: {best.design.tool_description}")
+            
+            # Show the generated URDF and actions
+            print("\n" + "-" * 40)
+            print("Generated Tool URDF:")
+            print("-" * 40)
+            print(best.design.tool_urdf[:1500] + "..." if len(best.design.tool_urdf) > 1500 else best.design.tool_urdf)
+            
+            print("\n" + "-" * 40)
+            print("Generated Actions (waypoints):")
+            print("-" * 40)
+            print(f"Shape: {best.design.actions.shape}")
+            print(best.design.actions)
+            
+            # Save to the named file so the example command works
+            actions_list = best.design.actions
+            if hasattr(actions_list, 'tolist'):
+                actions_list = actions_list.tolist()
+                
+            with open(output, 'w') as f:
+                json.dump({
+                    "reward": float(best.reward),
+                    "success": bool(best.success),
+                    "tool_urdf": best.design.tool_urdf,
+                    "actions": actions_list,
+                    "tool_description": best.design.tool_description,
+                }, f, indent=2)
+            
             print(f"\nSaved to: {output}")
             print(f"Visualize: uv run main.py --task {args.task} --evaluate {output} --gui")
         else:
-            print("No successful designs. Try more iterations or check API quota.")
+            print("No valid designs generated. Try more iterations or check API quota.")
             
     except KeyboardInterrupt:
         print("\n\nStopped.")
