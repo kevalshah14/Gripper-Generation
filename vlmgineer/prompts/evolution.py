@@ -1,39 +1,29 @@
 """
-Evolution instruction prompts for VLMgineer.
+Evolution instruction prompts for VLMgineer - matching the paper exactly (Appendix D.7).
 """
 
-EVOLUTION_INSTRUCTION_PROMPT = """
-## Evolutionary Process
+# Evolutionary instructions (from paper Appendix D.7)
+EVOLUTION_INSTRUCTION_PROMPT = """(Evolutionary Process) Your design decision is a part of a tool design genetic algorithm. For each of the tool designs, you can choose to either mutate or crossover.
 
-Your design is part of a genetic algorithm for tool creation. You must either MUTATE or perform CROSSOVER:
+Specifically, tool mutation is defined as one change to a single randomly selected previous tool design. Mutation changes include:
+(1) Changing the dimension, location, or orientation of a single component of the tool.
+(2) Adding, removing, or replacing a single component of the tool.
 
-### Mutation (change one tool)
-Pick ONE previous tool and make exactly ONE change:
-1. **Dimension change**: Modify the size of one component (make longer, wider, thinner)
-2. **Position change**: Move one component's attachment point
-3. **Orientation change**: Rotate one component
-4. **Add component**: Add a new box part to the tool
-5. **Remove component**: Remove one part (if multiple exist)
-6. **Replace component**: Swap one component for a different shape/size
+Crossover is defined as the process of combining two randomly selected previous tool designs to create a new tool design. Combination is defined as:
+(1) Selecting components from two previous tool designs and combining them to form a new tool design.
 
-### Crossover (combine two tools)
-Pick TWO previous tools and combine their elements:
-1. Take components from both designs
-2. Create a new tool that incorporates ideas from each
-3. The result should be a coherent, functional design
+All mutation and crossover decisions must potentially increase the likelihood of task success, yet all decisions must be different and diverse.
 
-### Guidelines
-- Learn from rewards: High-reward designs have good ideas to keep
-- Learn from failures: Low-reward designs show what to avoid
-- Stay diverse: Don't just make small tweaks to the best design
-- Be creative: Sometimes a big change leads to breakthrough
-- Physical intuition: Changes should make physical sense
+## Previous Elite Designs (Learn from these!)
 
-For each design you create:
-1. State whether it's a mutation or crossover
-2. Explain what you changed and why
-3. Predict how this change might improve performance
-"""
+The following designs achieved the highest rewards. Study their tool geometries and action patterns:
+
+{previous_designs}
+
+For each new design:
+1. Decide: MUTATION (modify one elite) or CROSSOVER (combine two elites)
+2. Explain your reasoning briefly
+3. Generate the new tool URDF and action waypoints"""
 
 SELECTION_CRITERIA_PROMPT = """
 ## Selection Criteria
@@ -50,6 +40,6 @@ Designs are evaluated based on:
    - Simpler tools (fewer components)
    - More robust designs (works from multiple starting positions)
 
-High-reward designs (>0.6) are candidates for evolution.
-Low-reward designs (<0.3) should be significantly modified or abandoned.
+High-reward designs (above threshold) are selected as elites for evolution.
+Low-reward designs are discarded.
 """

@@ -123,6 +123,8 @@ def get_config() -> VLMgineerConfig:
         n_tools=getattr(user, 'TOOLS_PER_AGENT', 3),
         n_actions=getattr(user, 'ACTIONS_PER_TOOL', 3),
         n_iterations=getattr(user, 'ITERATIONS', 3),
+        top_k=getattr(user, 'TOP_K', 5),
+        reward_threshold=getattr(user, 'REWARD_THRESHOLD', 0.3),
     )
     
     simulation = SimulationConfig(
@@ -135,6 +137,7 @@ def get_config() -> VLMgineerConfig:
         simulation=simulation,
         output_dir=getattr(user, 'OUTPUT_DIR', 'vlmgineer_results'),
         verbose=getattr(user, 'VERBOSE', True),
+        save_all_designs=getattr(user, 'SAVE_ALL_DESIGNS', True),
     )
 
 

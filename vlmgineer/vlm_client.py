@@ -378,29 +378,70 @@ class VLMClient:
         evolution_prompt: Optional[str],
         agent_idx: int,
     ) -> str:
-        """Build a minimal prompt for fast generation."""
+        """Build the full prompt following the paper's format (Appendix D)."""
+        from .prompts import ACTION_DIVERSITY_PROMPT, FRAME_CLARIFICATION_PROMPT, PROCEDURE_PROMPT
         
-        # Evolution context (brief)
+        # Format procedure prompt with n_tools and n_actions
+        procedure = PROCEDURE_PROMPT.format(n_tools=n_tools, n_actions=n_actions)
+        
+        # Evolution context with full design details
         evolution_context = ""
-        if previous_designs:
-            evolution_context = "Previous best (reward, description):\n"
-            for d in previous_designs[:3]:
-                evolution_context += f"- {d.get('reward', 0):.2f}: {d.get('description', '')[:100]}\n"
+        if previous_designs and evolution_prompt:
+            evolution_context = "\n## Previous Elite Designs\n\n"
+            evolution_context += "Learn from these high-performing designs:\n\n"
+            for i, d in enumerate(previous_designs[:5]):  # Top 5
+                reward = d.get('reward', 0)
+                urdf = d.get('tool_urdf', '')[:500]  # First 500 chars of URDF
+                evolution_context += f"### Elite Design {i+1} (reward: {reward:.3f})\n"
+                evolution_context += f"```xml\n{urdf}\n```\n\n"
+            
+            evolution_context += f"\n{evolution_prompt}\n"
         
+        # Build full prompt following paper structure
         prompt = f"""{system_prompt}
 
-Task: {task_description}
+{procedure}
 
-{frame_description}
+## Task Description
+{task_description}
+
+## Environment Code
+```python
+{environment_code}
+```
 
 {tool_spec}
 
 {action_spec}
 
+{ACTION_DIVERSITY_PROMPT}
+
+{FRAME_CLARIFICATION_PROMPT}
+
 {evolution_context}
 
-Generate {n_tools} tools, each with {n_actions} action sequences.
-Output ```xml for URDF, ```python for np.array waypoints. No explanations needed."""
+## Output Format
+
+For EACH of the {n_tools} tools you design:
+
+1. Briefly describe your tool strategy (1-2 sentences)
+
+2. Output the tool URDF in an ```xml code block:
+```xml
+<link name="...">...</link>
+<joint name="..." type="fixed">...</joint>
+```
+
+3. For EACH of the {n_actions} action sequences for this tool, output waypoints as a numpy array in a ```python code block:
+```python
+action = np.array([
+    [x, y, z, roll, pitch, yaw, gripper],  # waypoint 1
+    [x, y, z, roll, pitch, yaw, gripper],  # waypoint 2
+    ...
+])
+```
+
+Be creative and diverse! Each tool should take a different approach to solving the task."""
         return prompt
     
     def _parse_response(

@@ -6,6 +6,10 @@ VLMgineer Configuration
 Edit this file to configure your run, then execute:
     uv run main.py
 
+Based on the VLMgineer paper (Gao et al. 2025):
+- Paper uses nagents=20, ntool=10, naction=10 (2000 samples/iter) for best results
+- We use smaller defaults for faster iteration during development
+
 """
 
 # =============================================================================
@@ -21,35 +25,46 @@ Edit this file to configure your run, then execute:
 TASK = "bring_cube"
 
 # =============================================================================
-# EVOLUTION PARAMETERS
+# EVOLUTION PARAMETERS (Paper: nagents=20, ntool=10, naction=10, niter=3)
 # =============================================================================
 
-# Number of evolution iterations (more = better results, slower)
-ITERATIONS = 1
+# Number of evolution iterations (paper uses 3)
+ITERATIONS = 3
 
-# Number of parallel VLM agents per iteration
-AGENTS = 1
+# Number of parallel VLM agents per iteration (paper uses 20)
+# Each agent generates TOOLS_PER_AGENT * ACTIONS_PER_TOOL designs
+AGENTS = 3
 
-# Tools generated per agent
-TOOLS_PER_AGENT = 1
+# Tools generated per agent (paper uses 10)
+TOOLS_PER_AGENT = 3
 
-# Action sequences per tool
-ACTIONS_PER_TOOL = 1
+# Action sequences per tool (paper uses 10)
+ACTIONS_PER_TOOL = 3
+
+# Total samples per iteration = AGENTS * TOOLS_PER_AGENT * ACTIONS_PER_TOOL
+# Paper: 20 * 10 * 10 = 2000 samples/iteration
+# Default: 3 * 3 * 3 = 27 samples/iteration
+
+# Selection parameters for evolution
+TOP_K = 5  # Number of elite designs to keep (paper uses 5)
+REWARD_THRESHOLD = 0.3  # Minimum reward to be considered elite (paper uses 0.6 for BringCube)
 
 # =============================================================================
 # VLM CONFIGURATION
 # =============================================================================
 
 # Gemini model to use
-# "gemini-robotics-er-1.5-preview" - Specialized for robotics (best for tool design)
+# "gemini-2.5-pro" - Best for complex reasoning
 # "gemini-2.0-flash" - Fast general model
-MODEL = "gemini-robotics-er-1.5-preview"
+# "gemini-robotics-er-1.5-preview" - Specialized for robotics
+MODEL = "gemini-2.5-flash"
 
 # Temperature (0.0 = deterministic, 1.0 = creative)
-TEMPERATURE = 0.8
+# Paper doesn't specify, but moderate creativity helps diversity
+TEMPERATURE = 0.7
 
-# Max output tokens (increase if responses are truncated)
-MAX_TOKENS = 16384
+# Max output tokens (must be high enough for multiple tools + actions)
+MAX_TOKENS = 32768
 
 # =============================================================================
 # DISPLAY OPTIONS
@@ -67,3 +82,6 @@ VERBOSE = True
 
 # Directory to save results
 OUTPUT_DIR = "vlmgineer_results"
+
+# Save all designs (not just best)? Useful for analysis
+SAVE_ALL_DESIGNS = True

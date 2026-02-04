@@ -144,6 +144,10 @@ Examples:
         sys.exit(1)
     
     # Build config from settings
+    top_k = getattr(config, 'TOP_K', 5)
+    reward_threshold = getattr(config, 'REWARD_THRESHOLD', 0.3)
+    save_all = getattr(config, 'SAVE_ALL_DESIGNS', True)
+    
     full_config = VLMgineerConfig(
         vlm=VLMConfig(
             api_key=api_key,
@@ -156,15 +160,19 @@ Examples:
             n_tools=args.tools,
             n_actions=args.actions,
             n_iterations=args.iterations,
+            top_k=top_k,
+            reward_threshold=reward_threshold,
         ),
         simulation=SimulationConfig(gui=args.gui),
         output_dir=config.OUTPUT_DIR,
         verbose=args.verbose,
+        save_all_designs=save_all,
     )
     
     print(f"Model: {config.MODEL}")
     print(f"Iterations: {args.iterations}")
     print(f"Samples/iteration: {args.agents * args.tools * args.actions}")
+    print(f"Elite selection: top-{top_k} with reward >= {reward_threshold}")
     print()
     
     env = get_task_env(args.task, gui=args.gui)
