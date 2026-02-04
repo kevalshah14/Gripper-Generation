@@ -98,8 +98,27 @@ For waypoints, provide at least 5 waypoints that:
 
 Be creative! The tool should be specialized for this specific task."""
 
+    # Load API key (same logic as vlmgineer config)
+    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("API_KEY")
+    if not api_key:
+        env_file = Path(__file__).parent / ".env"
+        if env_file.exists():
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        k, v = k.strip(), v.strip().strip('"').strip("'")
+                        if k in ("API_KEY", "GOOGLE_API_KEY"):
+                            api_key = v
+                            break
+    
+    if not api_key:
+        print("ERROR: No API key found. Set GOOGLE_API_KEY in .env file.")
+        sys.exit(1)
+    
     # Query VLM with structured output
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    client = genai.Client(api_key=api_key)
     
     print("\nQuerying VLM with structured output...")
     response = client.models.generate_content(
