@@ -25,8 +25,8 @@ action = np.array([
 ])
 ```
 
-Workspace constraints for OWL 6.8 robot:
-- Reachable range: ~0.68m from base
+Workspace constraints for Franka Panda robot:
+- Reachable range: ~0.855m from base
 - Table surface at Z ≈ 0.04m
 - Safe operating height: Z > 0.1m
 - Robot base at origin (0, 0, 0)

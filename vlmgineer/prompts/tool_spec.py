@@ -64,9 +64,9 @@ TOOL_SPECIFICATION_WITH_GRIPPER_PROMPT = """Your tool design must follow these r
 3. **Mass**: Keep parts lightweight (mass < 0.01 kg).
 
 4. **Gripper Attachment**: Design tools that attach to the gripper fingers:
-   - Left finger attachment: parent link = "panda_leftfinger" (Note: adapt for OWL 6.8 gripper)
+   - Left finger attachment: parent link = "panda_leftfinger"
    - Right finger attachment: parent link = "panda_rightfinger"
-   - This allows the tool to be actuated by the gripper
+   - This allows the tool to be actuated by the Franka Panda gripper
 
 5. **Connectivity**: Parts must connect to their parent link.
 
